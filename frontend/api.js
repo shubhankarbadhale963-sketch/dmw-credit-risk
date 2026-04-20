@@ -1,8 +1,9 @@
 const PROD_API_URL = "https://your-backend.onrender.com";
 
-const BASE_URL = ["localhost", "127.0.0.1"].includes(window.location.hostname)
+const BASE_URL =
+  ["localhost", "127.0.0.1"].includes(window.location.hostname)
     ? "http://127.0.0.1:8000"
-    : PROD_API_URL;
+    : "https://dmw-credit-risk.onrender.com";
 
 async function fetchJSON(path, options = {}) {
     const response = await fetch(`${BASE_URL}${path}`, options);

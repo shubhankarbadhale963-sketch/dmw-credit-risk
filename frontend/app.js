@@ -8,6 +8,11 @@ import {
     predictAPI,
 } from "./api.js";
 
+document.addEventListener("DOMContentLoaded", () => {
+  fetch("https://dmw-credit-risk.onrender.com/health")
+    .catch(() => {});
+});
+
 const statusNode = document.getElementById("backendStatus");
 const navChips = Array.from(document.querySelectorAll(".nav-chip"));
 const predictionForm = document.getElementById("predictionForm");

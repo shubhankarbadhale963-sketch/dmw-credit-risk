@@ -15,6 +15,6 @@ backend/catboost_info/
 # Data (IMPORTANT)
 data/
 
-# Optional (good practice)
+# Optional
 *.log
 .env

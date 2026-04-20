@@ -1,0 +1,20 @@
+# Virtual env
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Backend specific
+backend/__pycache__/
+backend/catboost_info/
+
+# Mac
+.DS_Store
+
+# Data (IMPORTANT)
+data/
+
+# Optional (good practice)
+*.log
+.env

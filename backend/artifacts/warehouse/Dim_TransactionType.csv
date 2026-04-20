@@ -1,0 +1,5 @@
+TransactionType,TransactionTypeKey
+purchase,purchase
+refund,refund
+transfer,transfer
+cash_out,cash_out

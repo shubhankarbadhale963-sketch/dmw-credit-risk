@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fraud Intelligence Analytics Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=10">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script type="module" src="app.js?v=10"></script>
+</head>
+<body>
+    <div class="background-glow"></div>
+    <div class="background-mesh"></div>
+
+    <header class="topbar">
+        <div class="brand-wrap">
+            <h1>Fraud Intelligence Analytics Studio</h1>
+            <p><span id="typedLifecycleText">Unified processing, risk pattern exploration, model evaluation, and live fraud decisioning</span></p>
+        </div>
+        <div class="topbar-actions">
+            <div id="backendStatus" class="backend-status">Backend: checking...</div>
+            <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch theme">
+                <span id="themeIcon" class="theme-icon">Dark</span>
+            </button>
+        </div>
+    </header>
+
+    <nav class="lifecycle-nav" id="lifecycleNav">
+        <button class="nav-chip active" data-target="overview">Overview</button>
+        <button class="nav-chip" data-target="processing">Processing</button>
+        <button class="nav-chip" data-target="pattern">Pattern Discovery</button>
+        <button class="nav-chip" data-target="classification">Classification</button>
+        <button class="nav-chip" data-target="warehouse">Warehouse + OLAP</button>
+        <button class="nav-chip" data-target="prediction">Live Prediction</button>
+    </nav>
+
+    <main class="page" id="pageRoot">
+        <section id="overview" class="panel panel-reimagined hero">
+            <div class="hero-layout">
+                <div class="hero-side">
+                    <div class="metrics-grid">
+                        <article class="metric-card">
+                            <span>Total Transactions</span>
+                            <h3 id="metricTotalTransactions">-</h3>
+                        </article>
+                        <article class="metric-card">
+                            <span>Fraud Rate</span>
+                            <h3 id="metricFraudRate">-</h3>
+                        </article>
+                        <article class="metric-card">
+                            <span>Average Amount</span>
+                            <h3 id="metricAvgAmount">-</h3>
+                        </article>
+                        <article class="metric-card danger metric-best">
+                            <span>Best Model</span>
+                            <h3 id="metricBestModel">-</h3>
+                        </article>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="processing" class="panel panel-reimagined lifecycle-panel">
+            <p class="section-eyebrow">Stage 1</p>
+            <h3>Processing Stage: Data Transformation Journey</h3>
+            <p class="stage-summary">Raw data is acquired, cleaned, transformed, and engineered. Below you'll see before/after snapshots and what we changed at each step.</p>
+            <div class="processing-top">
+                <div class="before-after-cards">
+                    <article class="ba-card">
+                        <h5>Before Processing</h5>
+                        <ul class="ba-list" id="beforeList"></ul>
+                    </article>
+                    <article class="ba-card">
+                        <h5>After Processing</h5>
+                        <ul class="ba-list" id="afterList"></ul>
+                    </article>
+                </div>
+            </div>
+            <div class="processing-grid">
+                <article class="story-card">
+                    <h4>Acquisition</h4>
+                    <ul class="operation-list" id="acquisitionList"></ul>
+                </article>
+                <article class="story-card">
+                    <h4>Before vs After</h4>
+                    <ul class="operation-list" id="processingList"></ul>
+                </article>
+                <article class="story-card">
+                    <h4>Feature Engineering</h4>
+                    <ul class="operation-list" id="featureList"></ul>
+                </article>
+                <article class="story-card story-card-compact">
+                    <h4>Class Imbalance</h4>
+                    <div class="stage-kpi">
+                        <h4>Class Imbalance Ratio</h4>
+                        <p id="imbalanceRatio">-</p>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <section id="pattern" class="panel panel-reimagined hero">
+            <p class="section-eyebrow">Stage 2</p>
+            <h3>Pattern Discovery (EDA)</h3>
+            <p class="subtitle">Exploratory Data Analysis reveals hidden fraud patterns. Below: what we found and what it means.</p>
+            <div class="pattern-layout">
+                <div class="insights-box">
+                    <h4>Key Patterns Found:</h4>
+                    <ul id="patternInsights" class="insights-list"></ul>
+                </div>
+            </div>
+            <div class="charts-grid pattern-charts">
+                <article class="chart-card pattern-cd">
+                    <h4>Class Distribution</h4>
+                    <canvas id="classDistributionChart"></canvas>
+                </article>
+                <article class="chart-card pattern-ad">
+                    <h4>Amount Distribution</h4>
+                    <canvas id="amountDistributionChart"></canvas>
+                </article>
+                <article class="chart-card pattern-location">
+                    <h4>Fraud vs Non-Fraud by Location</h4>
+                    <canvas id="locationComparisonChart"></canvas>
+                </article>
+                <article class="chart-card pattern-trend">
+                    <h4>Fraud Trend Over Time</h4>
+                    <canvas id="trendChart"></canvas>
+                </article>
+                <article class="chart-card pattern-type">
+                    <h4>Fraud vs Non-Fraud by Type</h4>
+                    <canvas id="typeComparisonChart"></canvas>
+                </article>
+                <article class="chart-card pattern-merchant">
+                    <h4>Fraud by Merchant (Top 10)</h4>
+                    <canvas id="merchantChart"></canvas>
+                </article>
+            </div>
+        </section>
+
+        <section id="classification" class="panel panel-reimagined lifecycle-panel">
+            <p class="section-eyebrow">Stage 3</p>
+            <h3>Classification + Evaluation</h3>
+            <p class="stage-summary">We evaluate Logistic Regression and Random Forest, compare precision/recall at tuned thresholds, and explain which fraud signals matter most in the model.</p>
+            <div class="stage-layout">
+                <ul class="operation-list" id="modelList"></ul>
+                <div class="stage-kpi">
+                    <h4>Tuned Threshold</h4>
+                    <p id="thresholdValue">-</p>
+                    <h4 style="margin-top: 10px;">Key Fraud Drivers</h4>
+                    <p id="fraudDrivers">-</p>
+                </div>
+            </div>
+            <div class="charts-grid model-charts">
+                <article class="chart-card model-roc">
+                    <h4>ROC Curve</h4>
+                    <canvas id="rocCurveChart"></canvas>
+                </article>
+                <article class="chart-card model-threshold">
+                    <h4>Threshold vs Precision/Recall</h4>
+                    <canvas id="thresholdChart"></canvas>
+                </article>
+                <article class="chart-card model-feature">
+                    <h4>Feature Importance (Top)</h4>
+                    <canvas id="featureImportanceChart"></canvas>
+                </article>
+                <article class="chart-card model-pca">
+                    <h4>PCA Projection</h4>
+                    <canvas id="pcaChart"></canvas>
+                </article>
+            </div>
+        </section>
+
+        <section id="warehouse" class="panel panel-reimagined integration-panel">
+            <p class="section-eyebrow">Stage 4</p>
+            <h3>Data Warehouse + OLAP Analytics</h3>
+            <div class="insights-box">
+                <p><strong>What is a Data Warehouse?</strong> A data warehouse is a centralized repository optimized for analysis. Our warehouse contains 100,000 transaction records stored in a <strong>star schema</strong>—one fact table (transactions) connected to four dimension tables (date, merchant, location, transaction type). This structure enables multidimensional queries: "What is fraud rate by merchant in Delhi during weekends?" OLAP (Online Analytical Processing) pre-calculates fraud rates across these dimensions for instant analytics.</p>
+                <p style="margin-top: 10px;"><strong>Why Star Schema?</strong> It normalizes dimensions to avoid data redundancy while denormalizing the fact table for fast queries. Our schema creates fraud_rate_by_date, fraud_rate_by_merchant, fraud_rate_by_location, and fraud_rate_by_transaction_type views—enabling business intelligence dashboards.</p>
+            </div>
+            <div class="warehouse-layout">
+                <div class="flow-wrap">
+                    <div class="flow-box">
+                        <h4>Fact_Transactions</h4>
+                        <p id="factRows">Rows: -</p>
+                    </div>
+                    <div class="flow-arrow">+</div>
+                    <div class="flow-box">
+                        <h4>Dimensions</h4>
+                        <p id="dimRows">Rows: -</p>
+                    </div>
+                    <div class="flow-arrow">=</div>
+                    <div class="flow-box highlight">
+                        <h4>OLAP Views</h4>
+                        <p id="olapStatus">Ready</p>
+                    </div>
+                </div>
+                <div class="schema-card">
+                    <h4>Star Schema Diagram</h4>
+                    <div id="schemaDiagram" class="schema-diagram"></div>
+                </div>
+            </div>
+            <ul class="operation-list" id="warehouseList" style="margin-top: 14px;"></ul>
+        </section>
+
+        <section id="prediction" class="panel panel-reimagined prediction-panel">
+            <p class="section-eyebrow">Stage 5</p>
+            <h3>Live Prediction</h3>
+            <div class="insights-box prediction-intro">
+                <p><strong>How to Use:</strong> Enter a transaction's details to predict fraud risk. <strong>Date/Time:</strong> Use dates in the range Sept 22 - Oct 21, 2024 (when historical fraud varied 5-14% daily). <strong>Amount (₹):</strong> Try ₹10,000 (low-risk) to ₹300,000 (high-risk) to see probability change. <strong>Merchant ID:</strong> Top fraudulent merchants: M0001, M0002, M0003 (high fraud risk); others: M0100-M0999 (lower risk). <strong>Location:</strong> High-fraud cities: MUMBAI, DELHI (10-12% fraud rate); low-fraud: SURAT, PUNE (5-7% fraud). <strong>Type:</strong> Use "transfer" or "refund" (transfer has 2x higher fraud rate than refund). High amounts + high-fraud merchant + metro location = higher fraud probability.</p>
+            </div>
+            <div class="prediction-layout">
+                <form id="predictionForm" class="prediction-form">
+                    <label>
+                        Transaction Date
+                        <input type="datetime-local" id="transactionDate" required>
+                    </label>
+                    <label>
+                        Amount
+                        <input type="number" id="amount" min="0" step="0.01" required>
+                    </label>
+                    <label>
+                        Merchant ID
+                        <input type="text" id="merchantId" required>
+                    </label>
+                    <label>
+                        Transaction Type
+                        <select id="transactionType" required>
+                            <option value="">Select type</option>
+                            <option value="purchase">purchase</option>
+                            <option value="refund">refund</option>
+                            <option value="transfer">transfer</option>
+                            <option value="cash_out">cash_out</option>
+                        </select>
+                    </label>
+                    <label>
+                        Location
+                        <input type="text" id="location" required>
+                    </label>
+                    <button id="predictBtn" type="submit">Run Prediction</button>
+                </form>
+
+                <div class="prediction-output">
+                    <h4 id="predictionRisk">Risk: -</h4>
+                    <p id="predictionProbability">Probability: -</p>
+                    <div class="risk-meter">
+                        <div id="riskMeterFill" class="risk-meter-fill"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+    <div id="themeSplash" class="theme-splash"></div>
+</body>
+</html>

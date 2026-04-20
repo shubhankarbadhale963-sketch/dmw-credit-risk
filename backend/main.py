@@ -183,3 +183,7 @@ def predict(payload: Dict[str, Any]) -> Dict[str, Any]:
         "threshold": round(float(model_bundle["threshold"]), 4),
         "model": model_bundle["model_name"],
     }
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}

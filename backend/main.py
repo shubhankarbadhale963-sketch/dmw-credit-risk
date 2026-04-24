@@ -125,8 +125,11 @@ def model_evaluation() -> Dict[str, Any]:
     classification = report["dmw_lifecycle"]["classification"]
     return {
         "models": classification["models_trained"],
-        "metrics": classification["model_metrics_default_threshold"],
+        "model_availability_notes": classification.get("model_availability_notes", []),
+        "metrics": classification["model_metrics_tuned_threshold"],
+        "default_metrics": classification["model_metrics_default_threshold"],
         "best_model": classification["best_model"],
+        "best_threshold": classification.get("best_threshold", classification["threshold_tuning"]["threshold"]),
         "threshold_tuning": classification["threshold_tuning"],
         "threshold_grid": classification.get("threshold_grid", []),
         "curves": classification.get("curves", {}),
@@ -134,6 +137,7 @@ def model_evaluation() -> Dict[str, Any]:
         "pca": classification.get("pca", {}),
         "feature_importance": classification.get("feature_importance", {}),
         "imbalance_handling": classification["imbalance_handling"],
+        "model_rankings": classification.get("model_rankings", []),
         "key_fraud_drivers": report["dmw_lifecycle"]["pattern_discovery"]["key_fraud_drivers"],
     }
 
@@ -166,7 +170,10 @@ def predict(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     engineered = model_bundle["feature_engineer"].transform(input_df)
-    transformed = model_bundle["preprocessor"].transform(engineered)
+    if model_bundle.get("preprocessor") is not None:
+        transformed = model_bundle["preprocessor"].transform(engineered)
+    else:
+        transformed = engineered
     fraud_probability = float(model_bundle["model"].predict_proba(transformed)[:, 1][0])
 
     if fraud_probability >= 0.70:

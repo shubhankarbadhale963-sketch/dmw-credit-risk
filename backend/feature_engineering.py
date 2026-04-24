@@ -11,22 +11,30 @@ from typing import Dict
 
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
 
 
 @dataclass
-class FraudFeatureEngineer:
+class FraudFeatureEngineer(BaseEstimator, TransformerMixin):
     merchant_txn_count_: Dict[str, int] | None = None
     merchant_txn_freq_: Dict[str, float] | None = None
-    merchant_fraud_rate_: Dict[str, float] | None = None
+    merchant_fraud_sum_: Dict[str, float] | None = None
     merchant_avg_amount_: Dict[str, float] | None = None
     location_txn_count_: Dict[str, int] | None = None
     location_txn_freq_: Dict[str, float] | None = None
-    location_fraud_rate_: Dict[str, float] | None = None
+    location_fraud_sum_: Dict[str, float] | None = None
     location_avg_amount_: Dict[str, float] | None = None
-    type_fraud_rate_: Dict[str, float] | None = None
+    transaction_type_count_: Dict[str, int] | None = None
+    type_fraud_sum_: Dict[str, float] | None = None
     global_fraud_rate_: float = 0.0
     global_avg_amount_: float = 0.0
+    amount_median_: float = 0.0
+    amount_std_: float = 1.0
     high_value_threshold_: float = 0.0
+
+    @staticmethod
+    def _smoothed_rate(total: float, count: float, prior: float, smoothing: float = 25.0) -> float:
+        return (total + smoothing * prior) / (count + smoothing)
 
     def fit(self, df: pd.DataFrame, y: pd.Series) -> "FraudFeatureEngineer":
         train = df.copy()
@@ -34,18 +42,21 @@ class FraudFeatureEngineer:
 
         self.global_fraud_rate_ = float(y.mean())
         self.global_avg_amount_ = float(train["Amount"].mean())
+        self.amount_median_ = float(train["Amount"].median())
+        self.amount_std_ = float(train["Amount"].std(ddof=0) or 1.0)
         self.high_value_threshold_ = float(train["Amount"].quantile(0.90))
 
         self.merchant_txn_count_ = train.groupby("MerchantID").size().astype(int).to_dict()
         self.merchant_txn_freq_ = train["MerchantID"].value_counts(normalize=True).to_dict()
-        self.merchant_fraud_rate_ = train.groupby("MerchantID")["__target__"].mean().to_dict()
+        self.merchant_fraud_sum_ = train.groupby("MerchantID")["__target__"].sum().astype(float).to_dict()
         self.merchant_avg_amount_ = train.groupby("MerchantID")["Amount"].mean().to_dict()
 
         self.location_txn_count_ = train.groupby("Location").size().astype(int).to_dict()
         self.location_txn_freq_ = train["Location"].value_counts(normalize=True).to_dict()
-        self.location_fraud_rate_ = train.groupby("Location")["__target__"].mean().to_dict()
+        self.location_fraud_sum_ = train.groupby("Location")["__target__"].sum().astype(float).to_dict()
         self.location_avg_amount_ = train.groupby("Location")["Amount"].mean().to_dict()
-        self.type_fraud_rate_ = train.groupby("TransactionType")["__target__"].mean().to_dict()
+        self.transaction_type_count_ = train["TransactionType"].value_counts().astype(int).to_dict()
+        self.type_fraud_sum_ = train.groupby("TransactionType")["__target__"].sum().astype(float).to_dict()
         return self
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -60,26 +71,44 @@ class FraudFeatureEngineer:
         transformed["month"] = transformed["TransactionDate"].dt.month
         transformed["day_of_week"] = transformed["TransactionDate"].dt.dayofweek
         transformed["is_weekend"] = transformed["day_of_week"].isin([5, 6]).astype(int)
+        transformed["is_night_transaction"] = transformed["hour"].isin([0, 1, 2, 3, 4, 5, 22, 23]).astype(int)
+        transformed["hour_sin"] = np.sin(2 * np.pi * transformed["hour"].fillna(0) / 24.0)
+        transformed["hour_cos"] = np.cos(2 * np.pi * transformed["hour"].fillna(0) / 24.0)
+        transformed["day_of_week_sin"] = np.sin(2 * np.pi * transformed["day_of_week"].fillna(0) / 7.0)
+        transformed["day_of_week_cos"] = np.cos(2 * np.pi * transformed["day_of_week"].fillna(0) / 7.0)
+        transformed["month_sin"] = np.sin(2 * np.pi * transformed["month"].fillna(0) / 12.0)
+        transformed["month_cos"] = np.cos(2 * np.pi * transformed["month"].fillna(0) / 12.0)
 
         transformed["amount_log"] = np.log1p(transformed["Amount"])
-        transformed["normalized_amount"] = transformed["Amount"] / (transformed["Amount"].median() + 1e-6)
+        transformed["normalized_amount"] = transformed["Amount"] / (self.amount_median_ + 1e-6)
+        transformed["amount_zscore"] = (transformed["Amount"] - self.global_avg_amount_) / (self.amount_std_ + 1e-6)
         transformed["high_value_flag"] = (transformed["Amount"] >= self.high_value_threshold_).astype(int)
+        transformed["amount_to_global_avg_ratio"] = transformed["Amount"] / (self.global_avg_amount_ + 1e-6)
 
         transformed["merchant_transaction_count"] = transformed["MerchantID"].map(self.merchant_txn_count_).fillna(1)
         transformed["merchant_transaction_frequency"] = transformed["MerchantID"].map(self.merchant_txn_freq_).fillna(0.0)
-        transformed["merchant_fraud_rate"] = transformed["MerchantID"].map(self.merchant_fraud_rate_).fillna(self.global_fraud_rate_)
+        merchant_fraud_count = transformed["MerchantID"].map(self.merchant_fraud_sum_).fillna(0.0)
+        transformed["merchant_fraud_rate"] = self._smoothed_rate(merchant_fraud_count, transformed["merchant_transaction_count"], self.global_fraud_rate_)
         transformed["merchant_avg_amount"] = transformed["MerchantID"].map(self.merchant_avg_amount_).fillna(self.global_avg_amount_)
         transformed["merchant_amount_deviation"] = transformed["Amount"] - transformed["merchant_avg_amount"]
+        transformed["amount_to_merchant_avg_ratio"] = transformed["Amount"] / (transformed["merchant_avg_amount"] + 1e-6)
+        transformed["merchant_risk_amount_interaction"] = transformed["merchant_fraud_rate"] * transformed["amount_log"]
 
         transformed["location_transaction_count"] = transformed["Location"].map(self.location_txn_count_).fillna(1)
         transformed["location_transaction_frequency"] = transformed["Location"].map(self.location_txn_freq_).fillna(0.0)
-        transformed["location_fraud_rate"] = transformed["Location"].map(self.location_fraud_rate_).fillna(self.global_fraud_rate_)
+        location_fraud_count = transformed["Location"].map(self.location_fraud_sum_).fillna(0.0)
+        transformed["location_fraud_rate"] = self._smoothed_rate(location_fraud_count, transformed["location_transaction_count"], self.global_fraud_rate_)
         transformed["location_avg_amount"] = transformed["Location"].map(self.location_avg_amount_).fillna(self.global_avg_amount_)
         transformed["location_amount_deviation"] = transformed["Amount"] - transformed["location_avg_amount"]
+        transformed["amount_to_location_avg_ratio"] = transformed["Amount"] / (transformed["location_avg_amount"] + 1e-6)
+        transformed["location_risk_amount_interaction"] = transformed["location_fraud_rate"] * transformed["amount_log"]
 
-        transformed["transaction_type_fraud_rate"] = transformed["TransactionType"].map(self.type_fraud_rate_).fillna(self.global_fraud_rate_)
+        type_fraud_count = transformed["TransactionType"].map(self.type_fraud_sum_).fillna(0.0)
+        type_count = transformed["TransactionType"].map(self.transaction_type_count_).fillna(1)
+        transformed["transaction_type_fraud_rate"] = self._smoothed_rate(type_fraud_count, type_count, self.global_fraud_rate_)
+        transformed["transaction_type_amount_interaction"] = transformed["transaction_type_fraud_rate"] * transformed["amount_log"]
 
-        transformed = transformed.drop(columns=["TransactionDate", "MerchantID"])
+        transformed = transformed.drop(columns=["TransactionDate"])
         return transformed
 
     def fit_transform(self, df: pd.DataFrame, y: pd.Series) -> pd.DataFrame:

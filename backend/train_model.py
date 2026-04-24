@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
 from sklearn.compose import ColumnTransformer
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -36,8 +37,11 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold, train_test_split
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+from imblearn.over_sampling import SMOTE
+from imblearn.pipeline import Pipeline as ImbPipeline
 
 from data_integration import build_etl_tables, build_olap_views
 from feature_engineering import FraudFeatureEngineer
@@ -51,10 +55,39 @@ from preprocessing import (
     split_features_target,
 )
 
+
+def _configure_macos_openmp_path() -> None:
+    if os.name != "posix":
+        return
+    openmp_candidates = [
+        "/opt/homebrew/opt/libomp/lib",
+        "/usr/local/opt/libomp/lib",
+    ]
+    existing = [path for path in openmp_candidates if os.path.isdir(path)]
+    if not existing:
+        return
+
+    for key in ("DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH"):
+        current = os.environ.get(key, "")
+        current_parts = [part for part in current.split(":") if part]
+        merged = []
+        for path in existing + current_parts:
+            if path not in merged:
+                merged.append(path)
+        os.environ[key] = ":".join(merged)
+
+
+_configure_macos_openmp_path()
+
 try:
-    from imblearn.over_sampling import SMOTE
+    from xgboost import XGBClassifier
 except Exception:  # pragma: no cover - optional dependency
-    SMOTE = None
+    XGBClassifier = None
+
+try:
+    from catboost import CatBoostClassifier
+except Exception:  # pragma: no cover - optional dependency
+    CatBoostClassifier = None
 
 BASE_DIR = Path(__file__).resolve().parent
 WAREHOUSE_DIR = ARTIFACTS_DIR / "warehouse"
@@ -178,23 +211,6 @@ def train_test_val_split(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, 
     return train_df.reset_index(drop=True), val_df.reset_index(drop=True), test_df.reset_index(drop=True)
 
 
-def threshold_sweep(y_true: pd.Series, y_prob: np.ndarray, min_thr: float = 0.01, max_thr: float = 0.20) -> Tuple[float, List[Dict[str, Any]]]:
-    thresholds = np.arange(min_thr, max_thr + 0.0001, 0.01)
-    rows: List[Dict[str, Any]] = []
-    best_threshold = float(min_thr)
-    best_score = -1.0
-
-    for threshold in thresholds:
-        metrics = metrics_from_probs(y_true, y_prob, float(threshold))
-        rows.append(metrics)
-        score = metrics["f1_score"]
-        if score > best_score:
-            best_score = score
-            best_threshold = float(threshold)
-
-    return best_threshold, rows
-
-
 def build_curves(y_true: pd.Series, y_prob: np.ndarray) -> Dict[str, Any]:
     precision, recall, pr_thresholds = precision_recall_curve(y_true, y_prob)
     if len(np.unique(y_true)) < 2:
@@ -234,6 +250,175 @@ def top_k_capture(y_true: pd.Series, y_prob: np.ndarray, k_percent: float) -> Di
         "fraud_captured": fraud_captured,
         "fraud_total": fraud_total,
     }
+
+
+def make_one_hot_encoder() -> OneHotEncoder:
+    try:
+        return OneHotEncoder(handle_unknown="ignore", sparse_output=True)
+    except TypeError:  # pragma: no cover - older scikit-learn
+        return OneHotEncoder(handle_unknown="ignore", sparse=True)
+
+
+def build_preprocessor(categorical_features: List[str], numeric_features: List[str]) -> ColumnTransformer:
+    return ColumnTransformer(
+        transformers=[
+            ("cat", make_one_hot_encoder(), categorical_features),
+            ("num", StandardScaler(with_mean=False), numeric_features),
+        ],
+        remainder="drop",
+        sparse_threshold=0.3,
+    )
+
+
+def feature_columns(df: pd.DataFrame) -> List[str]:
+    return [column for column in df.columns if column not in {TARGET_COLUMN, "TransactionID"}]
+
+
+def threshold_sweep(
+    y_true: pd.Series,
+    y_prob: np.ndarray,
+    min_recall: float = 0.50,
+) -> Tuple[float, List[Dict[str, Any]], Dict[str, Any]]:
+    precision, recall, thresholds = precision_recall_curve(y_true, y_prob)
+    rows: List[Dict[str, Any]] = []
+
+    if len(thresholds) == 0:
+        metrics = metrics_from_probs(y_true, y_prob, 0.5)
+        return 0.5, [metrics], metrics
+
+    for threshold in thresholds:
+        rows.append(metrics_from_probs(y_true, y_prob, float(threshold)))
+
+    candidates = [row for row in rows if row["recall"] >= min_recall]
+    if candidates:
+        best_row = max(candidates, key=lambda row: (row["precision"], row["f1_score"], -row["threshold"]))
+    else:
+        best_row = max(rows, key=lambda row: (row["f1_score"], row["precision"], row["recall"]))
+
+    return float(best_row["threshold"]), rows, best_row
+
+
+class CatBoostNativeClassifier(BaseEstimator, ClassifierMixin):
+    def __init__(
+        self,
+        iterations: int = 350,
+        depth: int = 6,
+        learning_rate: float = 0.05,
+        l2_leaf_reg: float = 3.0,
+        random_strength: float = 1.0,
+        bagging_temperature: float = 0.3,
+        class_weights: List[float] | None = None,
+        random_state: int = 42,
+        verbose: bool = False,
+    ):
+        self.iterations = iterations
+        self.depth = depth
+        self.learning_rate = learning_rate
+        self.l2_leaf_reg = l2_leaf_reg
+        self.random_strength = random_strength
+        self.bagging_temperature = bagging_temperature
+        self.class_weights = class_weights
+        self.random_state = random_state
+        self.verbose = verbose
+
+    def fit(self, X: pd.DataFrame, y: pd.Series):
+        if CatBoostClassifier is None:
+            raise ImportError("catboost is not installed")
+
+        if not isinstance(X, pd.DataFrame):
+            raise ValueError("CatBoostNativeClassifier expects a pandas DataFrame input")
+
+        self.model_ = CatBoostClassifier(
+            iterations=self.iterations,
+            depth=self.depth,
+            learning_rate=self.learning_rate,
+            l2_leaf_reg=self.l2_leaf_reg,
+            random_strength=self.random_strength,
+            bagging_temperature=self.bagging_temperature,
+            class_weights=self.class_weights,
+            loss_function="Logloss",
+            eval_metric="PRAUC",
+            random_seed=self.random_state,
+            verbose=self.verbose,
+            allow_writing_files=False,
+        )
+        preferred_categoricals = ["TransactionType", "Location", "MerchantID"]
+        categorical_columns = [column for column in preferred_categoricals if column in X.columns]
+        if not categorical_columns:
+            categorical_columns = [
+                column
+                for column in X.columns
+                if pd.api.types.is_object_dtype(X[column])
+                or pd.api.types.is_categorical_dtype(X[column])
+                or pd.api.types.is_string_dtype(X[column])
+            ]
+
+        fit_frame = X.copy()
+        for column in categorical_columns:
+            fit_frame[column] = fit_frame[column].astype(str)
+        categorical_indices = [fit_frame.columns.get_loc(column) for column in categorical_columns]
+
+        self.model_.fit(fit_frame, y, cat_features=categorical_indices)
+        self.classes_ = np.array([0, 1])
+        self.categorical_columns_ = categorical_columns
+        return self
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        if not isinstance(X, pd.DataFrame):
+            raise ValueError("CatBoostNativeClassifier expects a pandas DataFrame input")
+        predict_frame = X.copy()
+        for column in self.categorical_columns_:
+            if column in predict_frame.columns:
+                predict_frame[column] = predict_frame[column].astype(str)
+        return self.model_.predict_proba(predict_frame)
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        if not isinstance(X, pd.DataFrame):
+            raise ValueError("CatBoostNativeClassifier expects a pandas DataFrame input")
+        predict_frame = X.copy()
+        for column in self.categorical_columns_:
+            if column in predict_frame.columns:
+                predict_frame[column] = predict_frame[column].astype(str)
+        return self.model_.predict(predict_frame)
+
+
+def build_tree_feature_names(preprocessor: ColumnTransformer) -> List[str]:
+    return preprocessor.get_feature_names_out().tolist()
+
+
+def compute_feature_importance(best_model: Any, feature_names: List[str]) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"tree_based": [], "logistic_coefficients": []}
+
+    if hasattr(best_model, "feature_importances_"):
+        scores = np.asarray(best_model.feature_importances_)
+        top_idx = np.argsort(scores)[::-1][:20]
+        payload["tree_based"] = [
+            {"feature": feature_names[index], "importance": float(scores[index])}
+            for index in top_idx
+        ]
+
+    if hasattr(best_model, "coef_"):
+        coefficients = np.asarray(best_model.coef_[0])
+        top_idx = np.argsort(np.abs(coefficients))[::-1][:20]
+        payload["logistic_coefficients"] = [
+            {"feature": feature_names[index], "coefficient": float(coefficients[index])}
+            for index in top_idx
+        ]
+
+    if hasattr(best_model, "get_feature_importance"):
+        scores = np.asarray(best_model.get_feature_importance())
+        top_idx = np.argsort(scores)[::-1][:20]
+        payload["tree_based"] = [
+            {"feature": feature_names[index], "importance": float(scores[index])}
+            for index in top_idx
+        ]
+
+    return payload
+
+
+def best_driver_list(feature_importance: Dict[str, Any]) -> List[str]:
+    ranked = feature_importance["tree_based"] if feature_importance["tree_based"] else feature_importance["logistic_coefficients"]
+    return [item["feature"] for item in ranked[:10]]
 
 
 def build_pca_payload(X_matrix: Any, y: pd.Series, sample_size: int = 3000) -> Dict[str, Any]:
@@ -333,79 +518,229 @@ def train() -> Dict[str, Any]:
     y_val = val_df[TARGET_COLUMN].copy()
     y_test = test_df[TARGET_COLUMN].copy()
 
-    engineer = FraudFeatureEngineer()
-    X_train = train_df.drop(columns=[TARGET_COLUMN, "TransactionID"])
-    X_val = val_df.drop(columns=[TARGET_COLUMN, "TransactionID"])
-    X_test = test_df.drop(columns=[TARGET_COLUMN, "TransactionID"])
+    X_train = train_df.drop(columns=[TARGET_COLUMN, "TransactionID"], errors="ignore")
+    X_val = val_df.drop(columns=[TARGET_COLUMN, "TransactionID"], errors="ignore")
+    X_test = test_df.drop(columns=[TARGET_COLUMN, "TransactionID"], errors="ignore")
 
-    X_train_fe = engineer.fit_transform(X_train, y_train)
-    X_val_fe = engineer.transform(X_val)
-    X_test_fe = engineer.transform(X_test)
+    feature_engineer = FraudFeatureEngineer().fit(X_train, y_train)
+    X_train_fe = feature_engineer.transform(X_train)
+    X_val_fe = feature_engineer.transform(X_val)
+    X_test_fe = feature_engineer.transform(X_test)
 
-    categorical_features = ["TransactionType", "Location"]
+    categorical_features = [
+        column
+        for column in ["TransactionType", "Location", "MerchantID"]
+        if column in X_train_fe.columns
+    ]
     numeric_features = [column for column in X_train_fe.columns if column not in categorical_features]
-
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features),
-            ("num", StandardScaler(), numeric_features),
-        ]
-    )
-
-    X_train_matrix = preprocessor.fit_transform(X_train_fe)
-    X_val_matrix = preprocessor.transform(X_val_fe)
-    X_test_matrix = preprocessor.transform(X_test_fe)
-    feature_names = preprocessor.get_feature_names_out().tolist()
-    pca_payload = build_pca_payload(X_train_matrix, y_train)
+    preprocessor = build_preprocessor(categorical_features, numeric_features)
+    visual_matrix = preprocessor.fit_transform(X_train_fe)
+    pca_payload = build_pca_payload(visual_matrix, y_train)
 
     pos_weight = float((len(y_train) - y_train.sum()) / max(int(y_train.sum()), 1))
-    models: Dict[str, Any] = {
-        "LogisticRegression": LogisticRegression(
-            max_iter=1200,
-            class_weight="balanced",
-            random_state=42,
-        ),
-        "RandomForest": RandomForestClassifier(
-            n_estimators=120,
-            class_weight="balanced_subsample",
-            random_state=42,
-            n_jobs=-1,
-            min_samples_leaf=2,
-        ),
-    }
+    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+    model_availability_notes: List[str] = []
 
-    model_metrics: Dict[str, Any] = {}
-    fitted_models: Dict[str, Any] = {}
+    model_specs: List[Tuple[str, Any, Dict[str, List[Any]], int, bool]] = []
+    model_specs.append(
+        (
+            "LogisticRegression",
+            ImbPipeline(
+                steps=[
+                    ("engineer", FraudFeatureEngineer()),
+                    ("preprocessor", build_preprocessor(categorical_features, numeric_features)),
+                    (
+                        "model",
+                        LogisticRegression(
+                            max_iter=2500,
+                            class_weight="balanced",
+                            random_state=42,
+                        ),
+                    ),
+                ]
+            ),
+            {
+                "model__C": [0.05, 0.1, 0.25, 0.5, 1.0, 2.0],
+            },
+            8,
+            True,
+        )
+    )
+    model_specs.append(
+        (
+            "RandomForest",
+            ImbPipeline(
+                steps=[
+                    ("engineer", FraudFeatureEngineer()),
+                    ("preprocessor", build_preprocessor(categorical_features, numeric_features)),
+                    (
+                        "model",
+                        RandomForestClassifier(
+                            class_weight="balanced_subsample",
+                            random_state=42,
+                            n_jobs=-1,
+                        ),
+                    ),
+                ]
+            ),
+            {
+                "model__n_estimators": [200, 300, 500],
+                "model__max_depth": [None, 6, 10, 14],
+                "model__min_samples_leaf": [1, 2, 4],
+                "model__max_features": ["sqrt", "log2", 0.5],
+            },
+            10,
+            True,
+        )
+    )
+
+    if XGBClassifier is not None:
+        model_specs.append(
+            (
+                "XGBoost",
+                ImbPipeline(
+                    steps=[
+                        ("engineer", FraudFeatureEngineer()),
+                        ("preprocessor", build_preprocessor(categorical_features, numeric_features)),
+                        (
+                            "model",
+                            XGBClassifier(
+                                objective="binary:logistic",
+                                eval_metric="logloss",
+                                tree_method="hist",
+                                random_state=42,
+                                n_jobs=-1,
+                                scale_pos_weight=pos_weight,
+                            ),
+                        ),
+                    ]
+                ),
+                {
+                    "model__n_estimators": [180, 250, 350],
+                    "model__max_depth": [3, 4, 5],
+                    "model__learning_rate": [0.03, 0.05, 0.08],
+                    "model__subsample": [0.7, 0.85, 1.0],
+                    "model__colsample_bytree": [0.6, 0.8, 1.0],
+                    "model__min_child_weight": [1, 3, 5],
+                    "model__reg_alpha": [0.0, 0.1, 0.5],
+                    "model__reg_lambda": [1.0, 2.0, 5.0],
+                },
+                8,
+                False,
+            )
+        )
+    else:
+        model_availability_notes.append(
+            "XGBoost unavailable in this runtime (missing libxgboost/libomp linkage on macOS)."
+        )
+
+    if CatBoostClassifier is not None:
+        model_specs.append(
+            (
+                "CatBoost",
+                ImbPipeline(
+                    steps=[
+                        ("engineer", FraudFeatureEngineer()),
+                        (
+                            "model",
+                            CatBoostNativeClassifier(
+                                class_weights=[1.0, pos_weight],
+                                random_state=42,
+                                verbose=False,
+                            ),
+                        ),
+                    ]
+                ),
+                {
+                    "model__iterations": [250, 350, 500],
+                    "model__depth": [4, 6, 8],
+                    "model__learning_rate": [0.03, 0.05, 0.08],
+                    "model__l2_leaf_reg": [3.0, 5.0, 7.0],
+                    "model__bagging_temperature": [0.0, 0.3, 0.7],
+                    "model__random_strength": [0.5, 1.0, 2.0],
+                },
+                8,
+                False,
+            )
+        )
+    else:
+        model_availability_notes.append("CatBoost is not installed in this environment.")
+
+    tuned_metrics_by_model: Dict[str, Any] = {}
+    default_metrics_by_model: Dict[str, Any] = {}
+    validation_threshold_rows: Dict[str, List[Dict[str, Any]]] = {}
+    model_rankings: List[Dict[str, Any]] = []
+    fitted_pipelines: Dict[str, Any] = {}
     validation_probs: Dict[str, np.ndarray] = {}
     test_probs: Dict[str, np.ndarray] = {}
 
-    for model_name, model in models.items():
-        model.fit(X_train_matrix, y_train)
-        fitted_models[model_name] = model
-        validation_probs[model_name] = model.predict_proba(X_val_matrix)[:, 1]
-        test_probs[model_name] = model.predict_proba(X_test_matrix)[:, 1]
-        model_metrics[model_name] = metrics_from_probs(y_test, test_probs[model_name], threshold=0.10)
+    for model_name, pipeline, param_grid, n_iter, use_parallel_search in model_specs:
+        search = RandomizedSearchCV(
+            estimator=pipeline,
+            param_distributions=param_grid,
+            n_iter=n_iter,
+            scoring="precision",
+            cv=cv,
+            random_state=42,
+            n_jobs=-1 if use_parallel_search else 1,
+            refit=True,
+            verbose=0,
+        )
+        search.fit(X_train, y_train)
 
-    # Optional SMOTE comparison on training data only.
-    imbalance_comparison: Dict[str, Any] = {"notes": []}
+        best_pipeline = search.best_estimator_
+        fitted_pipelines[model_name] = best_pipeline
+        validation_probs[model_name] = best_pipeline.predict_proba(X_val)[:, 1]
+        test_probs[model_name] = best_pipeline.predict_proba(X_test)[:, 1]
+
+        validation_threshold, threshold_rows, validation_best_metrics = threshold_sweep(y_val, validation_probs[model_name])
+        validation_threshold_rows[model_name] = threshold_rows
+        tuned_test_metrics = metrics_from_probs(y_test, test_probs[model_name], validation_threshold)
+        default_test_metrics = metrics_from_probs(y_test, test_probs[model_name], 0.5)
+
+        tuned_metrics_by_model[model_name] = tuned_test_metrics
+        default_metrics_by_model[model_name] = default_test_metrics
+        model_rankings.append(
+            {
+                "model": model_name,
+                "best_params": to_native(search.best_params_),
+                "validation_precision": float(validation_best_metrics["precision"]),
+                "validation_recall": float(validation_best_metrics["recall"]),
+                "validation_f1": float(validation_best_metrics["f1_score"]),
+                "validation_roc_auc": safe_roc_auc(y_val, validation_probs[model_name]),
+                "validation_pr_auc": safe_pr_auc(y_val, validation_probs[model_name]),
+                "validation_threshold": float(validation_threshold),
+                "test_default_metrics": default_test_metrics,
+                "test_tuned_metrics": tuned_test_metrics,
+            }
+        )
+
     if SMOTE is not None:
-        dense_train = X_train_matrix.toarray() if hasattr(X_train_matrix, "toarray") else X_train_matrix
-        dense_val = X_val_matrix.toarray() if hasattr(X_val_matrix, "toarray") else X_val_matrix
+        smote_preprocessor = build_preprocessor(categorical_features, numeric_features)
+        smote_train_matrix = smote_preprocessor.fit_transform(X_train_fe)
+        smote_val_matrix = smote_preprocessor.transform(X_val_fe)
+        dense_smote_train = smote_train_matrix.toarray() if hasattr(smote_train_matrix, "toarray") else smote_train_matrix
+        dense_smote_val = smote_val_matrix.toarray() if hasattr(smote_val_matrix, "toarray") else smote_val_matrix
         smote = SMOTE(random_state=42)
-        X_smote, y_smote = smote.fit_resample(dense_train, y_train)
-        smote_model = LogisticRegression(max_iter=1200, random_state=42)
+        X_smote, y_smote = smote.fit_resample(dense_smote_train, y_train)
+        smote_model = LogisticRegression(max_iter=2000, random_state=42)
         smote_model.fit(X_smote, y_smote)
-        smote_validation_probs = smote_model.predict_proba(dense_val)[:, 1]
-        imbalance_comparison["smote_logistic"] = metrics_from_probs(y_val, smote_validation_probs, threshold=0.10)
+        smote_validation_probs = smote_model.predict_proba(dense_smote_val)[:, 1]
+        imbalance_comparison: Dict[str, Any] = {
+            "smote_logistic": metrics_from_probs(y_val, smote_validation_probs, threshold=0.5),
+            "notes": ["SMOTE comparison is evaluated on the validation split only."] ,
+        }
     else:
-        imbalance_comparison["notes"].append("SMOTE unavailable in environment")
+        imbalance_comparison = {"notes": ["SMOTE unavailable in environment"]}
 
-    # Use validation probabilities for threshold tuning, then report test metrics at tuned threshold.
-    best_model_name = max(model_metrics.keys(), key=lambda name: model_metrics[name]["pr_auc"])
-    best_validation_probs = validation_probs[best_model_name]
-    tuned_threshold, threshold_grid = threshold_sweep(y_val, best_validation_probs)
+    best_model_name = max(
+        model_rankings,
+        key=lambda row: (row["validation_precision"], row["validation_recall"], row["validation_pr_auc"]),
+    )["model"]
+    best_rank = next(row for row in model_rankings if row["model"] == best_model_name)
+    best_threshold = float(best_rank["validation_threshold"])
     best_test_probs = test_probs[best_model_name]
-    tuned_test_metrics = metrics_from_probs(y_test, best_test_probs, tuned_threshold)
+    best_tuned_test_metrics = tuned_metrics_by_model[best_model_name]
     curves = build_curves(y_test, best_test_probs)
     capture = {
         "top_1_percent": top_k_capture(y_test, best_test_probs, 1.0),
@@ -413,30 +748,18 @@ def train() -> Dict[str, Any]:
         "top_10_percent": top_k_capture(y_test, best_test_probs, 10.0),
     }
 
-    feature_importance: Dict[str, Any] = {"tree_based": [], "logistic_coefficients": []}
-    best_model = fitted_models[best_model_name]
-    if hasattr(best_model, "feature_importances_"):
-        scores = best_model.feature_importances_
-        top_idx = np.argsort(scores)[::-1][:20]
-        feature_importance["tree_based"] = [
-            {"feature": feature_names[i], "importance": float(scores[i])} for i in top_idx
-        ]
-    logistic_model = fitted_models.get("LogisticRegression")
-    if logistic_model is not None and hasattr(logistic_model, "coef_"):
-        coefficients = logistic_model.coef_[0]
-        top_idx = np.argsort(np.abs(coefficients))[::-1][:20]
-        feature_importance["logistic_coefficients"] = [
-            {"feature": feature_names[i], "coefficient": float(coefficients[i])} for i in top_idx
-        ]
+    best_pipeline = fitted_pipelines[best_model_name]
+    best_model = best_pipeline.named_steps["model"]
+    if "preprocessor" in best_pipeline.named_steps:
+        best_feature_names = best_pipeline.named_steps["preprocessor"].get_feature_names_out().tolist()
+        pca_source_matrix = best_pipeline.named_steps["preprocessor"].transform(X_train_fe)
+    else:
+        best_feature_names = X_train_fe.columns.tolist()
+        pca_source_preprocessor = build_preprocessor(categorical_features, numeric_features)
+        pca_source_matrix = pca_source_preprocessor.fit_transform(X_train_fe)
 
-    key_drivers = [
-        item["feature"]
-        for item in (
-            feature_importance["tree_based"]
-            if feature_importance["tree_based"]
-            else feature_importance["logistic_coefficients"]
-        )[:10]
-    ]
+    feature_importance = compute_feature_importance(best_model, best_feature_names)
+    key_drivers = best_driver_list(feature_importance)
 
     warehouse_summary = {
         "fact_table": "Fact_Transactions",
@@ -457,22 +780,36 @@ def train() -> Dict[str, Any]:
                         "month",
                         "day_of_week",
                         "is_weekend",
+                        "is_night_transaction",
+                        "hour_sin",
+                        "hour_cos",
+                        "day_of_week_sin",
+                        "day_of_week_cos",
+                        "month_sin",
+                        "month_cos",
                         "amount_log",
                         "normalized_amount",
+                        "amount_zscore",
                         "high_value_flag",
+                        "amount_to_global_avg_ratio",
                         "merchant_transaction_count",
                         "merchant_transaction_frequency",
                         "merchant_fraud_rate",
                         "merchant_avg_amount",
                         "merchant_amount_deviation",
+                        "amount_to_merchant_avg_ratio",
+                        "merchant_risk_amount_interaction",
                         "location_transaction_count",
                         "location_transaction_frequency",
                         "location_fraud_rate",
                         "location_avg_amount",
                         "location_amount_deviation",
+                        "amount_to_location_avg_ratio",
+                        "location_risk_amount_interaction",
                         "transaction_type_fraud_rate",
+                        "transaction_type_amount_interaction",
                     ],
-                    "leakage_control": "Merchant and location aggregates are learned on training data only and applied to validation/test data.",
+                    "leakage_control": "Merchant, location, and transaction-type fraud-rate features are fit inside the training pipeline and smoothed toward the global training fraud rate.",
                 },
                 "split_strategy": {
                     "type": "stratified_holdout",
@@ -486,20 +823,24 @@ def train() -> Dict[str, Any]:
                 "key_fraud_drivers": key_drivers,
             },
             "classification": {
-                "models_trained": list(models.keys()),
-                "model_metrics_default_threshold": model_metrics,
+                "models_trained": [item["model"] for item in model_rankings],
+                "model_availability_notes": model_availability_notes,
+                "model_metrics_default_threshold": default_metrics_by_model,
+                "model_metrics_tuned_threshold": tuned_metrics_by_model,
                 "best_model": best_model_name,
-                "threshold_tuning": tuned_test_metrics,
-                "threshold_grid": threshold_grid,
+                "best_threshold": best_threshold,
+                "threshold_tuning": best_tuned_test_metrics,
+                "threshold_grid": validation_threshold_rows[best_model_name],
                 "curves": curves,
                 "fraud_capture": capture,
-                "pca": pca_payload,
+                "pca": build_pca_payload(pca_source_matrix, y_train),
                 "imbalance_handling": {
                     "class_weight_used": True,
                     "stratified_split": True,
                     "optional_smote_comparison": imbalance_comparison,
                 },
                 "feature_importance": feature_importance,
+                "model_rankings": model_rankings,
             },
             "warehouse": {
                 "etl": "Extract CSV -> transform transaction fields -> load processed dataset",
@@ -515,20 +856,20 @@ def train() -> Dict[str, Any]:
         }
     }
 
-    with open(REPORT_PATH, "w", encoding="utf-8") as report_file:
-        json.dump(to_native(lifecycle_report), report_file, indent=2)
-
     model_bundle = {
         "model_name": best_model_name,
+        "threshold": best_threshold,
+        "feature_engineer": best_pipeline.named_steps["engineer"],
+        "preprocessor": best_pipeline.named_steps.get("preprocessor"),
         "model": best_model,
-        "preprocessor": preprocessor,
-        "feature_engineer": engineer,
-        "threshold": tuned_threshold,
-        "feature_names": feature_names,
-        "model_kind": "matrix_model",
+        "feature_names": best_feature_names,
     }
+
     with open(MODEL_PATH, "wb") as model_file:
         pickle.dump(model_bundle, model_file)
+
+    with open(REPORT_PATH, "w", encoding="utf-8") as report_file:
+        json.dump(to_native(lifecycle_report), report_file, indent=2)
 
     return lifecycle_report
 

@@ -33,6 +33,7 @@ const chartRefs = {
     merchantChart: null,
     rocCurveChart: null,
     thresholdChart: null,
+    precisionRecallChart: null,
     featureImportanceChart: null,
     pcaChart: null,
 };
@@ -486,15 +487,27 @@ function renderPatternInsights(eda) {
 function renderModelSummary(evaluation) {
     const bestModel = evaluation?.best_model || "RandomForest";
     document.getElementById("metricBestModel").textContent = bestModel;
-    const threshold = evaluation?.threshold_tuning?.threshold || 0.2;
+    const threshold = evaluation?.best_threshold ?? evaluation?.threshold_tuning?.threshold ?? 0.2;
     document.getElementById("thresholdValue").textContent = threshold.toFixed(4);
     const drivers = evaluation?.key_fraud_drivers || ["merchant_fraud_rate", "location_fraud_rate"];
     document.getElementById("fraudDrivers").textContent = drivers.slice(0, 6).join(", ");
+
+    const rankingItems = (evaluation.model_rankings || []).map((row) => {
+        const tuned = evaluation.metrics?.[row.model] || row.test_tuned_metrics || {};
+        return `${row.model}: Validation precision=${Number(row.validation_precision).toFixed(3)}, validation recall=${Number(row.validation_recall).toFixed(3)}, tuned test precision=${Number(tuned.precision || 0).toFixed(3)}, tuned test recall=${Number(tuned.recall || 0).toFixed(3)}`;
+    });
 
     const listItems = evaluation.models.map((modelName) => {
         const m = evaluation.metrics[modelName];
         return `${modelName}: Precision=${m.precision.toFixed(3)}, Recall=${m.recall.toFixed(3)}, F1=${m.f1_score.toFixed(3)}, ROC-AUC=${m.roc_auc.toFixed(3)}, PR-AUC=${m.pr_auc.toFixed(3)}`;
     });
+
+    if (rankingItems.length) {
+        listItems.unshift(`Precision-focused model ranking: ${rankingItems.join(" | ")}`);
+    }
+    const availabilityNotes = evaluation.model_availability_notes || [];
+    availabilityNotes.forEach((note) => listItems.push(`Model availability note: ${note}`));
+    listItems.unshift(`Best model selected on validation precision: ${bestModel} @ threshold ${threshold.toFixed(4)}`);
 
     const confusion = evaluation.threshold_tuning.confusion_matrix;
     listItems.push(
@@ -527,6 +540,7 @@ function renderModelCharts(evaluation) {
     [
         "rocCurveChart",
         "thresholdChart",
+        "precisionRecallChart",
         "featureImportanceChart",
     ].forEach((key) => {
         if (chartRefs[key]) {
@@ -581,6 +595,51 @@ function renderModelCharts(evaluation) {
             ],
         },
         options: commonOptions,
+    });
+
+    const pr = evaluation.curves?.pr_curve || { precision: [], recall: [] };
+    const prPoints = (pr.recall || [])
+        .map((recallValue, index) => ({
+            x: Number(recallValue),
+            y: Number((pr.precision || [])[index]),
+        }))
+        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+
+    chartRefs.precisionRecallChart = new Chart(document.getElementById("precisionRecallChart"), {
+        type: "line",
+        data: {
+            datasets: [
+                {
+                    label: "Precision",
+                    data: prPoints,
+                    borderColor: palette.accent,
+                    backgroundColor: `${palette.accent}44`,
+                    fill: true,
+                    tension: 0.2,
+                    parsing: false,
+                },
+            ],
+        },
+        options: {
+            ...commonOptions,
+            scales: {
+                x: {
+                    type: "linear",
+                    min: 0,
+                    max: 1,
+                    title: { display: true, text: "Recall", color: palette.text },
+                    ticks: { color: palette.muted },
+                    grid: { color: palette.border },
+                },
+                y: {
+                    min: 0,
+                    max: 1,
+                    title: { display: true, text: "Precision", color: palette.text },
+                    ticks: { color: palette.muted },
+                    grid: { color: palette.border },
+                },
+            },
+        },
     });
 
     const fi = evaluation.feature_importance?.tree_based || [];

@@ -9,6 +9,9 @@ __pycache__/
 backend/__pycache__/
 backend/catboost_info/
 
+# Ignore model artifacts
+backend/artifacts/*.pkl
+
 # Mac
 .DS_Store
 

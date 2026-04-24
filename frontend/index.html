@@ -143,7 +143,7 @@
         <section id="classification" class="panel panel-reimagined lifecycle-panel">
             <p class="section-eyebrow">Stage 3</p>
             <h3>Classification + Evaluation</h3>
-            <p class="stage-summary">We evaluate Logistic Regression and Random Forest, compare precision/recall at tuned thresholds, and explain which fraud signals matter most in the model.</p>
+            <p class="stage-summary">We evaluate Logistic Regression, Random Forest, XGBoost, and CatBoost, compare precision/recall at tuned thresholds, and explain which fraud signals matter most in the model.</p>
             <div class="stage-layout">
                 <ul class="operation-list" id="modelList"></ul>
                 <div class="stage-kpi">
@@ -161,6 +161,10 @@
                 <article class="chart-card model-threshold">
                     <h4>Threshold vs Precision/Recall</h4>
                     <canvas id="thresholdChart"></canvas>
+                </article>
+                <article class="chart-card model-pr">
+                    <h4>Precision-Recall Curve</h4>
+                    <canvas id="precisionRecallChart"></canvas>
                 </article>
                 <article class="chart-card model-feature">
                     <h4>Feature Importance (Top)</h4>

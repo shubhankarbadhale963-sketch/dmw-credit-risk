@@ -202,25 +202,25 @@ function setupPredictionScenarios() {
 
     const scenarios = {
         high: {
-            transactionDate: "2024-10-19T23:15",
-            amount: 295000,
+            transactionDate: "2024-10-21T23:45",
+            amount: 405000,
             merchantId: "M0001",
             transactionType: "transfer",
             location: "MUMBAI",
         },
         medium: {
-            transactionDate: "2024-10-05T14:20",
-            amount: 125000,
-            merchantId: "M0008",
-            transactionType: "refund",
+            transactionDate: "2024-10-15T16:20",
+            amount: 240000,
+            merchantId: "M0002",
+            transactionType: "transfer",
             location: "DELHI",
         },
         low: {
             transactionDate: "2024-09-25T10:10",
-            amount: 12000,
-            merchantId: "M0321",
-            transactionType: "purchase",
-            location: "PUNE",
+            amount: 1200,
+            merchantId: "M0875",
+            transactionType: "refund",
+            location: "SURAT",
         },
     };
 

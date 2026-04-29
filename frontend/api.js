@@ -7,7 +7,7 @@ const BASE_URL =
 
 async function fetchJSON(path, options = {}) {
     const controller = new AbortController();
-    const timeoutMs = options.timeout || 120000; // 120s default
+    const timeoutMs = options.timeout || 180000; // 180s (3 min) default for /predict
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
@@ -23,7 +23,7 @@ async function fetchJSON(path, options = {}) {
     } catch (error) {
         clearTimeout(timeoutId);
         if (error.name === "AbortError") {
-            throw new Error("Request timeout. The server may be training the model (can take several minutes on first request).");
+            throw new Error("Request timeout after 3 minutes. The server may still be training. Please wait a moment and try again.");
         }
         throw error;
     }
@@ -60,6 +60,6 @@ export async function predictAPI(payload) {
             "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
-        timeout: 120000,
+        timeout: 180000,
     });
 }

@@ -858,9 +858,9 @@ async function handlePrediction(event) {
     };
 
     predictionRiskNode.textContent = "Fraud Label: Processing...";
-    predictionProbabilityNode.textContent = "Fraud Probability: This may take 1-3 minutes on first request while model trains...";
+    predictionProbabilityNode.textContent = "Fraud Probability: On first request, model training may take 2-5 minutes. Please wait...";
     predictBtn.disabled = true;
-    predictBtn.textContent = "⏳ Processing...";
+    predictBtn.textContent = "⏳ Training Model (2-5 min)...";
 
     try {
         const response = await predictAPI(payload);

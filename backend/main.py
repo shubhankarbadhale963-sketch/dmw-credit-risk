@@ -78,10 +78,19 @@ def _load_or_build_model_bundle() -> Dict[str, Any] | None:
     try:
         from train_model import train
 
+        logger.warning("=" * 60)
         logger.warning("Model artifact missing. Triggering on-demand training for /predict.")
+        logger.warning("This may take 2-5 minutes on first deploy. Please wait...")
+        logger.warning("=" * 60)
         train()
+        logger.warning("=" * 60)
+        logger.warning("On-demand training completed successfully.")
+        logger.warning("=" * 60)
     except Exception as exc:  # pragma: no cover - defensive runtime fallback
-        logger.exception("On-demand training failed: %s", exc)
+        logger.error("=" * 60)
+        logger.error("On-demand training FAILED with error:")
+        logger.exception("Exception details: %s", exc)
+        logger.error("=" * 60)
         return None
 
     return _load_model_bundle()

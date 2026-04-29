@@ -60,13 +60,13 @@ def _load_model_bundle() -> Dict[str, Any] | None:
 
 
 def _load_or_build_model_bundle() -> Dict[str, Any] | None:
-    """Load an existing model or build it on demand for first-time deployments."""
+    """Load the pre-trained model. Training should be done locally before deployment."""
     model_bundle = _load_model_bundle()
     if model_bundle is not None:
         return model_bundle
 
-    # Enabled by default so hosted environments with empty artifact storage can still serve predictions.
-    auto_train_enabled = os.getenv("AUTO_TRAIN_ON_MISSING_MODEL", "true").strip().lower() in {
+    # Pre-trained model should exist. If missing, something is wrong with deployment.
+    auto_train_enabled = os.getenv("AUTO_TRAIN_ON_MISSING_MODEL", "false").strip().lower() in {
         "1",
         "true",
         "yes",
@@ -79,8 +79,8 @@ def _load_or_build_model_bundle() -> Dict[str, Any] | None:
         from train_model import train
 
         logger.warning("=" * 60)
-        logger.warning("Model artifact missing. Triggering on-demand training for /predict.")
-        logger.warning("This may take 2-5 minutes on first deploy. Please wait...")
+        logger.warning("Model artifact missing. TRAINING ON DEMAND (not recommended).")
+        logger.warning("Pre-trained model should be committed to git and deployed with code.")
         logger.warning("=" * 60)
         train()
         logger.warning("=" * 60)
@@ -191,11 +191,11 @@ def warehouse_payload() -> Dict[str, Any]:
 
 @app.post("/predict")
 def predict(payload: Dict[str, Any]) -> Dict[str, Any]:
-    model_bundle = _load_or_build_model_bundle()
+    model_bundle = _load_model_bundle()
     if model_bundle is None:
         raise HTTPException(
             status_code=503,
-            detail="Prediction model unavailable. Run training or enable AUTO_TRAIN_ON_MISSING_MODEL.",
+            detail="Prediction model unavailable. Deploy the pre-trained fraud_model_bundle.pkl or enable AUTO_TRAIN_ON_MISSING_MODEL.",
         )
 
     input_df = pd.DataFrame(

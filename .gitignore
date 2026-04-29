@@ -10,7 +10,9 @@ backend/__pycache__/
 backend/catboost_info/
 
 # Ignore model artifacts
+# Ignore all pkl files EXCEPT the pre-trained fraud model
 backend/artifacts/*.pkl
+!backend/artifacts/fraud_model_bundle.pkl
 
 # Mac
 .DS_Store

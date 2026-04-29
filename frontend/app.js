@@ -845,6 +845,9 @@ async function loadDashboard() {
 
 async function handlePrediction(event) {
     event.preventDefault();
+    
+    const predictBtn = document.getElementById("predictBtn");
+    const originalText = predictBtn.textContent;
 
     const payload = {
         TransactionDate: document.getElementById("transactionDate").value.replace("T", " "),
@@ -854,8 +857,10 @@ async function handlePrediction(event) {
         Location: document.getElementById("location").value,
     };
 
-    predictionRiskNode.textContent = "Fraud Label: calculating...";
-    predictionProbabilityNode.textContent = "Fraud Probability: calculating...";
+    predictionRiskNode.textContent = "Fraud Label: Processing...";
+    predictionProbabilityNode.textContent = "Fraud Probability: This may take 1-3 minutes on first request while model trains...";
+    predictBtn.disabled = true;
+    predictBtn.textContent = "⏳ Processing...";
 
     try {
         const response = await predictAPI(payload);
@@ -863,9 +868,14 @@ async function handlePrediction(event) {
         predictionProbabilityNode.textContent = `Fraud Probability: ${Number(response.fraud_probability).toFixed(3)}`;
         riskMeterFill.style.width = `${Math.max(0, Math.min(100, Number(response.fraud_probability) * 100))}%`;
     } catch (error) {
-        predictionRiskNode.textContent = "Fraud Label: unavailable";
-        predictionProbabilityNode.textContent = "Fraud Probability: unavailable";
+        const errorMsg = error.message || "Prediction failed. Server may be unavailable.";
+        predictionRiskNode.textContent = `Fraud Label: Error`;
+        predictionProbabilityNode.textContent = `Error: ${errorMsg}`;
         riskMeterFill.style.width = "0%";
+        console.error("Prediction error:", error);
+    } finally {
+        predictBtn.disabled = false;
+        predictBtn.textContent = originalText;
     }
 }
 

@@ -6,11 +6,27 @@ const BASE_URL =
     : "https://dmw-credit-risk.onrender.com";
 
 async function fetchJSON(path, options = {}) {
-    const response = await fetch(`${BASE_URL}${path}`, options);
-    if (!response.ok) {
-        throw new Error(`API request failed: ${response.status}`);
+    const controller = new AbortController();
+    const timeoutMs = options.timeout || 120000; // 120s default
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        const response = await fetch(`${BASE_URL}${path}`, {
+            ...options,
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (!response.ok) {
+            throw new Error(`API request failed: ${response.status}`);
+        }
+        return response.json();
+    } catch (error) {
+        clearTimeout(timeoutId);
+        if (error.name === "AbortError") {
+            throw new Error("Request timeout. The server may be training the model (can take several minutes on first request).");
+        }
+        throw error;
     }
-    return response.json();
 }
 
 export async function getHealthStatus() {
@@ -44,5 +60,6 @@ export async function predictAPI(payload) {
             "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
+        timeout: 120000,
     });
 }

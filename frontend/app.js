@@ -19,6 +19,7 @@ const predictionForm = document.getElementById("predictionForm");
 const predictionRiskNode = document.getElementById("predictionRisk");
 const predictionProbabilityNode = document.getElementById("predictionProbability");
 const riskMeterFill = document.getElementById("riskMeterFill");
+const scenarioApplyButtons = Array.from(document.querySelectorAll(".scenario-apply"));
 const typedLifecycleText = document.getElementById("typedLifecycleText");
 const themeToggle = document.getElementById("themeToggle");
 const themeIcon = document.getElementById("themeIcon");
@@ -194,6 +195,48 @@ function setupInteractiveEffects() {
     );
 
     revealNodes.forEach((node) => revealObserver.observe(node));
+}
+
+function setupPredictionScenarios() {
+    if (!scenarioApplyButtons.length) return;
+
+    const scenarios = {
+        high: {
+            transactionDate: "2024-10-19T23:15",
+            amount: 295000,
+            merchantId: "M0001",
+            transactionType: "transfer",
+            location: "MUMBAI",
+        },
+        medium: {
+            transactionDate: "2024-10-05T14:20",
+            amount: 125000,
+            merchantId: "M0008",
+            transactionType: "refund",
+            location: "DELHI",
+        },
+        low: {
+            transactionDate: "2024-09-25T10:10",
+            amount: 12000,
+            merchantId: "M0321",
+            transactionType: "purchase",
+            location: "PUNE",
+        },
+    };
+
+    scenarioApplyButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            const key = button.dataset.scenario;
+            const scenario = scenarios[key];
+            if (!scenario) return;
+
+            document.getElementById("transactionDate").value = scenario.transactionDate;
+            document.getElementById("amount").value = String(scenario.amount);
+            document.getElementById("merchantId").value = scenario.merchantId;
+            document.getElementById("transactionType").value = scenario.transactionType;
+            document.getElementById("location").value = scenario.location;
+        });
+    });
 }
 
 async function refreshBackendStatus() {
@@ -827,6 +870,7 @@ async function handlePrediction(event) {
 }
 
 function init() {
+    setupPredictionScenarios();
     predictionForm.addEventListener("submit", handlePrediction);
     setupThemeToggle();
     setupTypingText();

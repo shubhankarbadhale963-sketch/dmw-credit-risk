@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import pickle
+import logging
 from pathlib import Path
 from typing import Any, Dict
 
@@ -19,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from preprocessing import ARTIFACTS_DIR, DATE_COLUMN, RAW_DATA_PATH, STANDARD_DATASET_PATH, load_standardized_dataset
 
 app = FastAPI(title="Fraud Detection API")
+logger = logging.getLogger(__name__)
 
 
 def _cors_config() -> tuple[list[str], bool]:
@@ -55,6 +57,34 @@ def _load_model_bundle() -> Dict[str, Any] | None:
         return None
     with open(MODEL_PATH, "rb") as model_file:
         return pickle.load(model_file)
+
+
+def _load_or_build_model_bundle() -> Dict[str, Any] | None:
+    """Load an existing model or build it on demand for first-time deployments."""
+    model_bundle = _load_model_bundle()
+    if model_bundle is not None:
+        return model_bundle
+
+    # Enabled by default so hosted environments with empty artifact storage can still serve predictions.
+    auto_train_enabled = os.getenv("AUTO_TRAIN_ON_MISSING_MODEL", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if not auto_train_enabled:
+        return None
+
+    try:
+        from train_model import train
+
+        logger.warning("Model artifact missing. Triggering on-demand training for /predict.")
+        train()
+    except Exception as exc:  # pragma: no cover - defensive runtime fallback
+        logger.exception("On-demand training failed: %s", exc)
+        return None
+
+    return _load_model_bundle()
 
 
 def _load_report() -> Dict[str, Any] | None:
@@ -152,9 +182,12 @@ def warehouse_payload() -> Dict[str, Any]:
 
 @app.post("/predict")
 def predict(payload: Dict[str, Any]) -> Dict[str, Any]:
-    model_bundle = _load_model_bundle()
+    model_bundle = _load_or_build_model_bundle()
     if model_bundle is None:
-        raise HTTPException(status_code=404, detail="Model artifact missing. Run training first.")
+        raise HTTPException(
+            status_code=503,
+            detail="Prediction model unavailable. Run training or enable AUTO_TRAIN_ON_MISSING_MODEL.",
+        )
 
     input_df = pd.DataFrame(
         [

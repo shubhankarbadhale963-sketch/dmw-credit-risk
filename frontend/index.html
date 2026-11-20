@@ -35,6 +35,7 @@
         <button class="nav-chip" data-target="classification">Classification</button>
         <button class="nav-chip" data-target="warehouse">Warehouse + OLAP</button>
         <button class="nav-chip" data-target="prediction">Live Prediction</button>
+        <button class="nav-chip" data-target="code">Code Implementation</button>
     </nav>
 
     <main class="page" id="pageRoot">
@@ -283,6 +284,312 @@
                     </div>
                 </div>
             </div>
+                <!-- CODE IMPLEMENTATION SECTION -->
+        <section id="code" class="panel panel-reimagined code-panel">
+
+            <p class="section-eyebrow">Technical Documentation</p>
+
+            <h3>Code Implementation & Methodology</h3>
+
+            <p class="stage-summary">
+                Explore the actual Python implementation behind the
+                data wrangling, preprocessing, feature engineering,
+                machine learning and analytics workflow.
+            </p>
+
+            <div class="code-grid">
+
+                <!-- DATA CLEANING -->
+                <article class="code-card">
+                    <div class="code-heading">
+                        <div>
+                            <span>MODULE II</span>
+                            <h4>Data Cleaning & Missing Values</h4>
+                        </div>
+                        <span class="code-language">Python</span>
+                    </div>
+
+                    <p>
+                        Removing duplicate records and handling
+                        missing values using Pandas.
+                    </p>
+
+                    <pre><code>working = df.copy()
+
+# Remove duplicate records
+working = working.drop_duplicates()
+
+# Handle missing numeric values
+for column in working.select_dtypes(
+    include=["number"]
+).columns:
+
+    working[column] = working[column].fillna(
+        working[column].median()
+    )
+
+# Handle missing categorical values
+for column in working.select_dtypes(
+    include=["object"]
+).columns:
+
+    mode = working[column].mode()
+    fallback = mode.iloc[0] if not mode.empty else "Unknown"
+
+    working[column] = working[column].fillna(fallback)</code></pre>
+                </article>
+
+
+                <!-- DATA TRANSFORMATION -->
+                <article class="code-card">
+                    <div class="code-heading">
+                        <div>
+                            <span>MODULE III</span>
+                            <h4>Data Transformation</h4>
+                        </div>
+                        <span class="code-language">Python</span>
+                    </div>
+
+                    <p>
+                        Converting data types, parsing dates
+                        and extracting useful time features.
+                    </p>
+
+                    <pre><code># Convert transaction date
+df["TransactionDate"] = pd.to_datetime(
+    df["TransactionDate"],
+    errors="coerce"
+)
+
+# Extract date components
+df["hour"] = df["TransactionDate"].dt.hour
+
+df["day_of_week"] = (
+    df["TransactionDate"].dt.dayofweek
+)
+
+df["month"] = (
+    df["TransactionDate"].dt.month
+)</code></pre>
+                </article>
+
+
+                <!-- FEATURE ENGINEERING -->
+                <article class="code-card">
+                    <div class="code-heading">
+                        <div>
+                            <span>MODULE IV</span>
+                            <h4>Feature Engineering</h4>
+                        </div>
+                        <span class="code-language">Python</span>
+                    </div>
+
+                    <p>
+                        Creating additional features to improve
+                        fraud pattern identification.
+                    </p>
+
+                    <pre><code># Log transformation
+df["amount_log"] = np.log1p(
+    df["Amount"]
+)
+
+# Weekend identification
+df["is_weekend"] = (
+    df["day_of_week"].isin([5, 6]).astype(int)
+)
+
+# Amount normalization
+df["normalized_amount"] = (
+    df["Amount"] / (amount_median + 1e-6)
+)
+
+# High-value transaction detection
+df["high_value_flag"] = (
+    df["Amount"] >= high_value_threshold
+).astype(int)</code></pre>
+                </article>
+
+
+                <!-- ENCODING -->
+                <article class="code-card">
+                    <div class="code-heading">
+                        <div>
+                            <span>MODULE V</span>
+                            <h4>Encoding & Standardization</h4>
+                        </div>
+                        <span class="code-language">Scikit-learn</span>
+                    </div>
+
+                    <p>
+                        One-hot encoding for categorical features
+                        and scaling numerical features.
+                    </p>
+
+                    <pre><code>from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import (
+    OneHotEncoder,
+    StandardScaler
+)
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        (
+            "cat",
+            OneHotEncoder(
+                handle_unknown="ignore"
+            ),
+            categorical_features
+        ),
+        (
+            "num",
+            StandardScaler(with_mean=False),
+            numeric_features
+        )
+    ],
+    remainder="drop"
+)</code></pre>
+                </article>
+
+
+                <!-- SMOTE -->
+                <article class="code-card">
+                    <div class="code-heading">
+                        <div>
+                            <span>MODULE V</span>
+                            <h4>Class Imbalance – SMOTE</h4>
+                        </div>
+                        <span class="code-language">Imbalanced-learn</span>
+                    </div>
+
+                    <p>
+                        Synthetic Minority Over-sampling Technique
+                        to balance the training dataset.
+                    </p>
+
+                    <pre><code>from imblearn.over_sampling import SMOTE
+
+smote = SMOTE(
+    random_state=42
+)
+
+X_smote, y_smote = smote.fit_resample(
+    dense_smote_train,
+    y_train
+)</code></pre>
+
+                    <small>
+                        SMOTE is applied to the training data only.
+                    </small>
+                </article>
+
+
+                <!-- TRAIN TEST SPLIT -->
+                <article class="code-card">
+                    <div class="code-heading">
+                        <div>
+                            <span>MODULE V</span>
+                            <h4>Train, Validation & Test Split</h4>
+                        </div>
+                        <span class="code-language">Scikit-learn</span>
+                    </div>
+
+                    <p>
+                        Dividing the dataset while preserving
+                        the fraud class distribution.
+                    </p>
+
+                    <pre><code>from sklearn.model_selection import train_test_split
+
+train_df, test_df = train_test_split(
+    df,
+    test_size=0.2,
+    stratify=df["IsFraud"],
+    random_state=42
+)
+
+train_df, val_df = train_test_split(
+    train_df,
+    test_size=0.2,
+    stratify=train_df["IsFraud"],
+    random_state=42
+)</code></pre>
+                </article>
+
+
+                <!-- PCA -->
+                <article class="code-card">
+                    <div class="code-heading">
+                        <div>
+                            <span>MODULE IV</span>
+                            <h4>Principal Component Analysis</h4>
+                        </div>
+                        <span class="code-language">Scikit-learn</span>
+                    </div>
+
+                    <p>
+                        Reducing dimensionality and projecting
+                        features into two principal components.
+                    </p>
+
+                    <pre><code>from sklearn.decomposition import PCA
+
+pca = PCA(
+    n_components=2,
+    random_state=42
+)
+
+components = pca.fit_transform(
+    dense_sample
+)
+
+explained_variance = (
+    pca.explained_variance_ratio_
+)</code></pre>
+                </article>
+
+
+                <!-- DATA INTEGRATION -->
+                <article class="code-card">
+                    <div class="code-heading">
+                        <div>
+                            <span>MODULE III</span>
+                            <h4>Data Integration & Aggregation</h4>
+                        </div>
+                        <span class="code-language">Pandas</span>
+                    </div>
+
+                    <p>
+                        Integrating transaction data and generating
+                        grouped analytical summaries.
+                    </p>
+
+                    <pre><code># Group transactions by location
+fraud_by_location = (
+    df.groupby("Location")["IsFraud"]
+    .mean()
+    .reset_index(name="FraudRate")
+)
+
+# Group transactions by merchant
+fraud_by_merchant = (
+    df.groupby("MerchantID")["IsFraud"]
+    .mean()
+    .reset_index(name="FraudRate")
+)</code></pre>
+                </article>
+
+            </div>
+
+            <div class="code-footer">
+                <h4>Implementation Stack</h4>
+
+                <p>
+                    Python · Pandas · NumPy · Scikit-learn ·
+                    Imbalanced-learn · Matplotlib · Machine Learning
+                </p>
+            </div>
+
         </section>
     </main>
     <div id="themeSplash" class="theme-splash"></div>

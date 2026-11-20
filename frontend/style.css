@@ -1220,3 +1220,98 @@ body::before {
         animation: none !important;
     }
 }
+/* ==========================================
+   CODE IMPLEMENTATION SECTION
+========================================== */
+
+.code-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 22px;
+}
+
+.code-card {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px;
+    background: var(--surface-strong);
+    min-width: 0;
+}
+
+.code-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.code-heading span:first-child {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+}
+
+.code-heading h4 {
+    margin-top: 5px;
+    font-size: 1.05rem;
+}
+
+.code-language {
+    font-size: 0.72rem;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 5px 9px;
+    border-radius: 7px;
+    white-space: nowrap;
+}
+
+.code-card p {
+    font-size: 0.88rem;
+    color: var(--muted);
+    line-height: 1.5;
+    margin-bottom: 14px;
+}
+
+.code-card pre {
+    background: #0b1220;
+    color: #dbeafe;
+    padding: 16px;
+    border-radius: 11px;
+    overflow-x: auto;
+    font-size: 0.78rem;
+    line-height: 1.7;
+    tab-size: 4;
+}
+
+.code-card code {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    white-space: pre;
+}
+
+.code-card small {
+    display: block;
+    margin-top: 10px;
+    color: var(--muted);
+}
+
+.code-footer {
+    margin-top: 20px;
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+}
+
+.code-footer p {
+    color: var(--muted);
+    margin-top: 8px;
+}
+
+@media (max-width: 800px) {
+    .code-grid {
+        grid-template-columns: 1fr;
+    }
+}

@@ -164,7 +164,15 @@ function setupNavigation() {
         { threshold: 0.45 }
     );
 
-    ["overview", "processing", "pattern", "classification", "warehouse", "prediction"].forEach(
+    [
+        "overview",
+        "processing",
+        "pattern",
+        "classification",
+        "warehouse",
+        "prediction",
+        "code"
+    ].forEach(
         (id) => {
             const section = document.getElementById(id);
             if (section) {
